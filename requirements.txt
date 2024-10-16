@@ -1,0 +1,6 @@
+av
+vosk
+sounddevice
+pyaudio
+pygame
+pillow
