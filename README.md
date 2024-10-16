@@ -57,10 +57,10 @@ pip install -r requirements.txt
 
 ## Project Structure
 ```
-.
 ├── idle.mp4                # Idle video for avatar
 ├── speaking.mp4            # Speaking video for avatar
 ├── app.py                  # Main script for chatbot functionality
+├── requirements.txt        # File containing python libraries to be installed
 └── README.md               # Project documentation
 ```
 
