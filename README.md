@@ -35,6 +35,20 @@ pip install -r requirements.txt
 - **Windows**:
   Download and install eSpeak from the [official site](http://espeak.sourceforge.net/).
 
+### Install Ollama and LLaMA Model
+- To install Ollama, follow the instructions from the [Ollama website](https://ollama.com/):
+  - **macOS**: 
+    ```bash
+    brew install ollama/tap/ollama
+    ```
+  - **Windows/Linux**: 
+    Download the binary from [here](https://ollama.com/downloads) and follow the installation guide.
+  
+- After installing Ollama, download the LLaMA 3.2 model:
+  ```bash
+  ollama pull llama3.2
+  ```
+
 ## How to Run
 
 1. Clone the project:
