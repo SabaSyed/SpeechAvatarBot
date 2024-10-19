@@ -69,7 +69,7 @@ pip install -r requirements.txt
 
 1. **Clone the project**:
    ```bash
-   git clone <https://github.com/SabaSyed/SpeechAvatarBot>
+   git clone https://github.com/SabaSyed/SpeechAvatarBot
    cd <project-directory>
    ```
 
