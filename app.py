@@ -78,9 +78,8 @@ class VideoManager:
 class SpeechManager:
 
     def __init__(self):
-        self.model_zip_path = "vosk-model-small-en-us-0.15.zip"
-        with zipfile.ZipFile(self.model_zip_path, 'r') as zip_ref:
-            zip_ref.extractall(".")
+        self.model_path = "vosk-model-small-en-us-0.15"
+    
         # self.model_path = "vosk-model-small-en-us-0.15"
         self.model = vosk.Model(self.model_path)
         self.recognizer = vosk.KaldiRecognizer(self.model, 16000)
