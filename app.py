@@ -22,22 +22,6 @@ WINDOW_HEIGHT = VIDEO_HEIGHT + 60
 SYSTEM_PROMPT = """You are a friendly and polite voice-based assistant. Please respond concisely and conversationally, as if speaking to the user directly. Avoid technical terms and keep responses simple."""
 
 # Class to manage eSpeak Text-to-Speech functionality
-# class TTSManager:
-#     def __init__(self):
-#         self.speech_completed = threading.Event()
-
-#     def run_espeak_tts(self, text):
-#         self.speech_completed.clear()
-#         print("TTS (eSpeak) audio started...")
-#         try:
-#             # Use subprocess to call eSpeak for TTS
-#             subprocess.run(['espeak', text], check=True)
-#             print("TTS (eSpeak) audio has finished playing.")
-#         except subprocess.CalledProcessError as e:
-#             print(f"An error occurred while using eSpeak: {e}")
-#         self.speech_completed.set()
-
-
 class TTSManager:
     def __init__(self):
         self.speech_completed = threading.Event()
@@ -46,19 +30,35 @@ class TTSManager:
         self.speech_completed.clear()
         print("TTS (eSpeak) audio started...")
         try:
-            # Check if we need to provide a full path to espeak
-            espeak_executable = 'espeak'
-            if os.name == 'nt':  # If on Windows
-                espeak_executable = r'C:\Program Files\eSpeak\command_line\espeak.exe'
-
-            # Use subprocess to call eSpeak for TTS with options for better clarity
-            subprocess.run([espeak_executable, '-s', '150', '-v', 'en', text], check=True)
+            # Use subprocess to call eSpeak for TTS
+            subprocess.run(['espeak', text], check=True)
             print("TTS (eSpeak) audio has finished playing.")
         except subprocess.CalledProcessError as e:
             print(f"An error occurred while using eSpeak: {e}")
-        except FileNotFoundError:
-            print("eSpeak executable not found. Please ensure eSpeak is installed and the path is set correctly.")
         self.speech_completed.set()
+
+
+# class TTSManager:
+#     def __init__(self):
+#         self.speech_completed = threading.Event()
+
+#     def run_espeak_tts(self, text):
+#         self.speech_completed.clear()
+#         print("TTS (eSpeak) audio started...")
+#         try:
+#             # Check if we need to provide a full path to espeak
+#             espeak_executable = 'espeak'
+#             if os.name == 'nt':  # If on Windows
+#                 espeak_executable = r'C:\Program Files\eSpeak\command_line\espeak.exe'
+
+#             # Use subprocess to call eSpeak for TTS with options for better clarity
+#             subprocess.run([espeak_executable, '-s', '150', '-v', 'en', text], check=True)
+#             print("TTS (eSpeak) audio has finished playing.")
+#         except subprocess.CalledProcessError as e:
+#             print(f"An error occurred while using eSpeak: {e}")
+#         except FileNotFoundError:
+#             print("eSpeak executable not found. Please ensure eSpeak is installed and the path is set correctly.")
+#         self.speech_completed.set()
 
 class VideoManager:
     def __init__(self, screen, video_path):
