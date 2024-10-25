@@ -4,3 +4,4 @@ sounddevice
 pyaudio
 pygame
 pillow
+ollama
