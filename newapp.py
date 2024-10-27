@@ -7,13 +7,14 @@ import json
 import time
 import ollama
 import os
+import pyaudio
 import numpy as np
 from TTS.api import TTS
 import sounddevice as sd
 
 # Paths to idle and talking avatar videos
-IDLE_VIDEO = 'idle.mp4'
-TALKING_VIDEO = 'speaking.mp4'
+IDLE_VIDEO = 'assets/idle.mp4'
+TALKING_VIDEO = 'assets/speaking.mp4'
 
 SYSTEM_PROMPT = """You are a friendly, chatty and polite voice-based bot. Please respond concisely and conversationally, as if speaking to the user directly. Avoid technical terms and keep responses simple."""
 
@@ -22,7 +23,7 @@ class TTSManager:
         self.speech_completed = threading.Event()
         self.tts_model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")
 
-    def run_tts(self, text, reference_audio_path="ref.wav", lang="en"):
+    def run_tts(self, text, reference_audio_path="assets/ref.wav", lang="en"):
         self.speech_completed.clear()
         print("TTS (Coqui TTS) audio generation started...")
 
@@ -42,30 +43,34 @@ class SpeechManager:
         self.model_path = "vosk-model-small-en-us-0.15"
         self.model = vosk.Model(self.model_path)
         self.recognizer = vosk.KaldiRecognizer(self.model, 16000)
+        self.p = pyaudio.PyAudio()
+        self.stream = self.p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)
+        self.stream.start_stream()
 
     def listen(self):
         print("Listening for user input...")
+        buffer = b""
         full_text = ""
         silence_threshold = 2
         silence_start = time.time()
-
-        def callback(indata, frames, time_info, status):
-            if status:
-                print(status)
-            if self.recognizer.AcceptWaveform(indata.tobytes()):
+        while True:
+            data = self.stream.read(4000, exception_on_overflow=False)
+            buffer += data
+            if self.recognizer.AcceptWaveform(buffer):
                 result = self.recognizer.Result()
                 text = json.loads(result).get("text", "")
                 if text:
                     print(f"Recognized Text: {text}")
                     full_text += text + " "
                     silence_start = time.time()
-
-        with sd.InputStream(callback=callback, channels=1, samplerate=16000):
-            while True:
-                if time.time() - silence_start > silence_threshold:
-                    if full_text.strip():
-                        print(f"Final Text: {full_text}")
-                        return full_text.strip()
+            else:
+                partial_result = self.recognizer.PartialResult()
+                partial_text = json.loads(partial_result).get("partial", "")
+            if time.time() - silence_start > silence_threshold:
+                if full_text.strip():
+                    print(f"Final Text: {full_text}")
+                    return full_text.strip()
+            buffer = b""
 
     def generate_llama_response(self, prompt):
         try:
