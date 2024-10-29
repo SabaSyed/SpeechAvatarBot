@@ -19,19 +19,16 @@ SYSTEM_PROMPT = """You are a friendly, chatty, and polite voice-based bot. Pleas
 
 class TTSManager:
     def __init__(self):
-        self.speech_completed = threading.Event()
-        self.tts_model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")
+        self.tts_model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")  # Load once for efficiency
 
     def run_tts(self, text, reference_audio_path="ref.wav", lang="en"):
-        self.speech_completed.clear()
         try:
+            print("Generating TTS audio...")
             wav_data = self.tts_model.tts(text=text, speaker_wav=reference_audio_path, language=lang)
             audio_array = np.array(wav_data, dtype=np.float32)
-            sd.play(audio_array, samplerate=22050, blocking=True)
+            sd.play(audio_array, samplerate=22050)  # Synchronous playback
         except Exception as e:
             print(f"TTS error: {e}")
-        finally:
-            self.speech_completed.set()
 
 class SpeechManager:
     def __init__(self):
@@ -46,20 +43,18 @@ class SpeechManager:
         full_text = ""
         silence_threshold = 2
         silence_start = time.time()
+        print("Listening for user input...")
 
         while True:
-            try:
-                data = self.stream.read(4000, exception_on_overflow=False)
-                buffer += data
-                if self.recognizer.AcceptWaveform(buffer):
-                    result = self.recognizer.Result()
-                    text = json.loads(result).get("text", "")
-                    if text:
-                        full_text += text + " "
-                        silence_start = time.time()
-            except Exception as e:
-                print(f"Audio stream error: {e}")
-                continue
+            data = self.stream.read(4000, exception_on_overflow=False)
+            buffer += data
+            if self.recognizer.AcceptWaveform(buffer):
+                result = self.recognizer.Result()
+                text = json.loads(result).get("text", "")
+                if text:
+                    print(f"Recognized Text: {text}")
+                    full_text += text + " "
+                    silence_start = time.time()
             if time.time() - silence_start > silence_threshold and full_text.strip():
                 return full_text.strip()
             buffer = b""
@@ -70,18 +65,14 @@ class SpeechManager:
             response = ollama.generate(model="dolphin-llama3", prompt=full_prompt)
             return response.get("response", "I couldn't generate a response.")
         except Exception as e:
+            print(f"Llama response generation error: {e}")
             return "Error generating response."
 
-    def close(self):
-        self.stream.stop_stream()
-        self.stream.close()
-        self.p.terminate()
-
 class VideoManager:
-    def __init__(self, screen, video_path, semaphore):
+    def __init__(self, screen, video_path):
         self.screen = screen
         self.video_path = video_path
-        self.semaphore = semaphore
+        self.stop_event = threading.Event()
 
     def play_video(self):
         try:
@@ -89,15 +80,16 @@ class VideoManager:
             video_stream = container.streams.video[0]
             frame_rate = max(15.0, float(video_stream.average_rate) - 5)
 
-            with self.semaphore:
-                for frame in container.decode(video=0):
-                    img = frame.to_image()
-                    frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
-                    self.screen.blit(pygame.transform.scale(frame_surface, self.screen.get_size()), (0, 0))
-                    pygame.display.flip()
-                    pygame.time.delay(int(1000 / frame_rate))
-                    self.handle_ui_events()
-                container.close()
+            for frame in container.decode(video=0):
+                if self.stop_event.is_set():
+                    break
+                img = frame.to_image()
+                frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
+                self.screen.blit(pygame.transform.scale(frame_surface, self.screen.get_size()), (0, 0))
+                pygame.display.flip()
+                pygame.time.delay(int(1000 / frame_rate))
+                self.handle_ui_events()
+            container.close()
         except Exception as e:
             print(f"Error playing video: {e}")
 
@@ -117,12 +109,11 @@ class AvatarChatbot:
         self.video_semaphore = threading.Semaphore(1)
 
     def cleanup(self):
-        self.speech_manager.close()
         pygame.quit()
         sys.exit()
 
     def run(self):
-        idle_video_manager = VideoManager(self.screen, IDLE_VIDEO, self.video_semaphore)
+        idle_video_manager = VideoManager(self.screen, IDLE_VIDEO)
         idle_thread = threading.Thread(target=idle_video_manager.play_video)
         idle_thread.start()
 
@@ -132,22 +123,24 @@ class AvatarChatbot:
                 if user_input:
                     bot_response = self.speech_manager.generate_llama_response(user_input)
 
-                    # Stop the idle video
-                    self.video_semaphore.acquire()
-                    speaking_video_manager = VideoManager(self.screen, TALKING_VIDEO, self.video_semaphore)
+                    # Stop idle video and acquire semaphore for speaking video
+                    idle_video_manager.stop_event.set()
+                    idle_thread.join()
+                    self.video_semaphore.acquire()  # Acquire semaphore before starting speaking video
+
+                    # Play speaking video and TTS response
+                    speaking_video_manager = VideoManager(self.screen, TALKING_VIDEO)
                     speaking_thread = threading.Thread(target=speaking_video_manager.play_video)
-                    speaking_thread.start()
-
-                    # Run TTS in non-blocking mode
                     tts_thread = threading.Thread(target=self.tts_manager.run_tts, args=(bot_response,))
+
+                    speaking_thread.start()
                     tts_thread.start()
-
-                    tts_thread.join()
                     speaking_thread.join()
-                    self.video_semaphore.release()
+                    tts_thread.join()
 
-                    # Re-launch idle video after response completes
-                    idle_video_manager = VideoManager(self.screen, IDLE_VIDEO, self.video_semaphore)
+                    # Release semaphore and restart idle video
+                    self.video_semaphore.release()
+                    idle_video_manager = VideoManager(self.screen, IDLE_VIDEO)
                     idle_thread = threading.Thread(target=idle_video_manager.play_video)
                     idle_thread.start()
 
