@@ -26,7 +26,7 @@ class TTSManager:
             print("Generating TTS audio...")
             wav_data = self.tts_model.tts(text=text, speaker_wav=reference_audio_path, language=lang)
             audio_array = np.array(wav_data, dtype=np.float32)
-            sd.play(audio_array, samplerate=22050, blocking = Flase)  # Non-blocking playback
+            sd.play(audio_array, samplerate=22050, blocking = False)  # Non-blocking playback
         except Exception as e:
             print(f"TTS error: {e}")
 
