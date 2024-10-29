@@ -26,7 +26,7 @@ class TTSManager:
             print("Generating TTS audio...")
             wav_data = self.tts_model.tts(text=text, speaker_wav=reference_audio_path, language=lang)
             audio_array = np.array(wav_data, dtype=np.float32)
-            sd.play(audio_array, samplerate=22050, blocking=True)  # Synchronous playback
+            sd.play(audio_array, samplerate=22050, blocking=False)  # Non-blocking playback
         except Exception as e:
             print(f"TTS error: {e}")
 
@@ -51,12 +51,12 @@ class SpeechManager:
             if self.recognizer.AcceptWaveform(buffer):
                 result = self.recognizer.Result()
                 text = json.loads(result).get("text", "")
-                if text:
+                if text and len(text.split()) > 2:  # Filtering out short or noise-like inputs
                     print(f"Recognized Text: {text}")
                     full_text += text + " "
                     silence_start = time.time()
             if time.time() - silence_start > silence_threshold and full_text.strip():
-                return full_text.strip()
+                return full_text.strip()  # Return full input after pause
             buffer = b""
 
     def generate_llama_response(self, prompt):
@@ -127,16 +127,14 @@ class AvatarChatbot:
         # Stop the idle video
         self.idle_video_manager.stop_event.set()
         self.idle_video_manager.stop_event.clear()
+
+        # Generate TTS audio fully before starting the speaking video
+        self.tts_manager.run_tts(bot_response)
+
+        # Only then start the speaking video
         speaking_video_manager = VideoManager(self.screen, TALKING_VIDEO)
-
-        # Play speaking video and TTS in separate threads
         speaking_thread = threading.Thread(target=speaking_video_manager.play_video)
-        tts_thread = threading.Thread(target=self.tts_manager.run_tts, args=(bot_response,))
-
         speaking_thread.start()
-        tts_thread.start()
-        tts_thread.join()  # Wait until TTS finishes
-        speaking_video_manager.stop_event.set()
         speaking_thread.join()
 
     def run(self):
@@ -149,9 +147,9 @@ class AvatarChatbot:
                 user_input = self.speech_manager.listen()
                 if user_input:
                     bot_response = self.speech_manager.generate_llama_response(user_input)
-
+                    
                     self.transition_to_speaking(bot_response)
-
+                    
                     # Restart idle video after response completion
                     idle_thread = threading.Thread(target=self.idle_video_manager.play_video)
                     idle_thread.start()
