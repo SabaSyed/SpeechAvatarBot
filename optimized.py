@@ -26,7 +26,7 @@ class TTSManager:
             print("Generating TTS audio...")
             wav_data = self.tts_model.tts(text=text, speaker_wav=reference_audio_path, language=lang)
             audio_array = np.array(wav_data, dtype=np.float32)
-            sd.play(audio_array, samplerate=22050)  # Non-blocking playback
+            sd.play(audio_array, samplerate=22050, blocking = Flase)  # Non-blocking playback
         except Exception as e:
             print(f"TTS error: {e}")
 
@@ -122,34 +122,37 @@ class AvatarChatbot:
         idle_video_manager = VideoManager(self.screen, IDLE_VIDEO)
         idle_thread = threading.Thread(target=idle_video_manager.play_video)
         idle_thread.start()
-
+    
         try:
             while True:
                 user_input = self.speech_manager.listen()
                 if user_input:
                     bot_response = self.speech_manager.generate_llama_response(user_input)
-
+    
                     # Stop idle video and acquire semaphore for speaking video
                     idle_video_manager.stop_event.set()
                     idle_thread.join()
                     self.video_semaphore.acquire()
-
+    
                     # Play speaking video and TTS response
-                    speaking_video_manager = VideoManager(self.screen, TALKING_VIDEO)
-                    speaking_thread = threading.Thread(target=speaking_video_manager.play_video)
-                    tts_thread = threading.Thread(target=self.tts_manager.run_tts, args=(bot_response,))
-
-                    speaking_thread.start()
-                    tts_thread.start()
-                    tts_thread.join()
-                    speaking_thread.join()
-
-                    # Release semaphore and restart idle video
-                    self.video_semaphore.release()
+                    try:
+                        speaking_video_manager = VideoManager(self.screen, TALKING_VIDEO)
+                        speaking_thread = threading.Thread(target=speaking_video_manager.play_video)
+                        tts_thread = threading.Thread(target=self.tts_manager.run_tts, args=(bot_response,))
+    
+                        speaking_thread.start()
+                        tts_thread.start()
+                        tts_thread.join()
+                        speaking_thread.join()
+                    finally:
+                        # Ensure semaphore release even if an error occurs
+                        self.video_semaphore.release()
+    
+                    # Reset and restart idle video
+                    idle_video_manager.stop_event.clear()
                     idle_video_manager = VideoManager(self.screen, IDLE_VIDEO)
                     idle_thread = threading.Thread(target=idle_video_manager.play_video)
                     idle_thread.start()
-
         except Exception as e:
             print(f"Error occurred: {e}")
             self.cleanup()
