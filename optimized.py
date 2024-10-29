@@ -26,7 +26,7 @@ class TTSManager:
             print("Generating TTS audio...")
             wav_data = self.tts_model.tts(text=text, speaker_wav=reference_audio_path, language=lang)
             audio_array = np.array(wav_data, dtype=np.float32)
-            sd.play(audio_array, samplerate=22050, blocking=False)  # Non-blocking playback
+            sd.play(audio_array, samplerate=22050, blocking=True)  # Synchronous playback
         except Exception as e:
             print(f"TTS error: {e}")
 
@@ -122,7 +122,7 @@ class AvatarChatbot:
         self.speech_manager = SpeechManager()
         self.video_semaphore = threading.Semaphore(1)
         self.idle_video_manager = VideoManager(self.screen, IDLE_VIDEO)
-        
+
     def transition_to_speaking(self, bot_response):
         # Stop the idle video
         self.idle_video_manager.stop_event.set()
@@ -149,15 +149,19 @@ class AvatarChatbot:
                 user_input = self.speech_manager.listen()
                 if user_input:
                     bot_response = self.speech_manager.generate_llama_response(user_input)
-                    
+
                     self.transition_to_speaking(bot_response)
-                    
+
                     # Restart idle video after response completion
                     idle_thread = threading.Thread(target=self.idle_video_manager.play_video)
                     idle_thread.start()
         except Exception as e:
             print(f"Error occurred: {e}")
             self.cleanup()
+
+    def cleanup(self):
+        pygame.quit()
+        sys.exit()
 
 if __name__ == "__main__":
     try:
