@@ -26,7 +26,7 @@ class TTSManager:
             print("Generating TTS audio...")
             wav_data = self.tts_model.tts(text=text, speaker_wav=reference_audio_path, language=lang)
             audio_array = np.array(wav_data, dtype=np.float32)
-            sd.play(audio_array, samplerate=22050)  # Synchronous playback
+            sd.play(audio_array, samplerate=22050)  # Non-blocking playback
         except Exception as e:
             print(f"TTS error: {e}")
 
@@ -35,7 +35,7 @@ class SpeechManager:
         self.model = vosk.Model("vosk-model-small-en-us-0.15")
         self.recognizer = vosk.KaldiRecognizer(self.model, 16000)
         self.p = pyaudio.PyAudio()
-        self.stream = self.p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=16000)
+        self.stream = self.p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)  # Smaller buffer size
         self.stream.start_stream()
 
     def listen(self):
@@ -87,10 +87,11 @@ class VideoManager:
                         break
                     img = frame.to_image()
                     frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
-                    
+
                     # Clear screen and blit video frame centered and scaled
                     self.screen.fill((0, 0, 0))
-                    self.screen.blit(pygame.transform.scale(frame_surface, (1024, 1600)), (0, 0))
+                    video_rect = frame_surface.get_rect(center=(self.screen.get_width()//2, self.screen.get_height()//2))
+                    self.screen.blit(pygame.transform.scale(frame_surface, video_rect.size), video_rect.topleft)
                     pygame.display.update()
                     pygame.time.delay(int(1000 / frame_rate))
                     self.handle_ui_events()
@@ -107,7 +108,7 @@ class VideoManager:
 class AvatarChatbot:
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((1024, 1600))  # Set display to match desired video resolution in portrait
+        self.screen = pygame.display.set_mode((1024, 1600))
         pygame.display.set_caption('Avatar Chatbot')
         self.tts_manager = TTSManager()
         self.speech_manager = SpeechManager()
@@ -131,7 +132,7 @@ class AvatarChatbot:
                     # Stop idle video and acquire semaphore for speaking video
                     idle_video_manager.stop_event.set()
                     idle_thread.join()
-                    self.video_semaphore.acquire()  # Acquire semaphore before starting speaking video
+                    self.video_semaphore.acquire()
 
                     # Play speaking video and TTS response
                     speaking_video_manager = VideoManager(self.screen, TALKING_VIDEO)
@@ -140,8 +141,8 @@ class AvatarChatbot:
 
                     speaking_thread.start()
                     tts_thread.start()
-                    speaking_thread.join()
                     tts_thread.join()
+                    speaking_thread.join()
 
                     # Release semaphore and restart idle video
                     self.video_semaphore.release()
