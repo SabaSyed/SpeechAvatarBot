@@ -12,8 +12,8 @@ from TTS.api import TTS
 import sounddevice as sd
 
 # Paths to idle and talking avatar videos
-IDLE_VIDEO = 'assets/idle.mp4'
-TALKING_VIDEO = 'assets/speaking.mp4'
+IDLE_VIDEO = 'idle.mp4'
+TALKING_VIDEO = 'speaking.mp4'
 
 SYSTEM_PROMPT = """You are a friendly, chatty, and polite voice-based bot. Please respond concisely and conversationally, as if speaking to the user directly. Avoid technical terms and keep responses simple."""
 
@@ -21,7 +21,7 @@ class TTSManager:
     def __init__(self):
         self.tts_model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")  # Load once for efficiency
 
-    def run_tts(self, text, reference_audio_path="assets/ref.wav", lang="en"):
+    def run_tts(self, text, reference_audio_path="ref.wav", lang="en"):
         try:
             print("Generating TTS audio...")
             wav_data = self.tts_model.tts(text=text, speaker_wav=reference_audio_path, language=lang)
