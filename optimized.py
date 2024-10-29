@@ -26,7 +26,7 @@ class TTSManager:
             print("Generating TTS audio...")
             wav_data = self.tts_model.tts(text=text, speaker_wav=reference_audio_path, language=lang)
             audio_array = np.array(wav_data, dtype=np.float32)
-            sd.play(audio_array, samplerate=22050, blocking = False)  # Non-blocking playback
+            sd.play(audio_array, samplerate=22050, blocking=False)  # Non-blocking playback
         except Exception as e:
             print(f"TTS error: {e}")
 
@@ -35,7 +35,7 @@ class SpeechManager:
         self.model = vosk.Model("vosk-model-small-en-us-0.15")
         self.recognizer = vosk.KaldiRecognizer(self.model, 16000)
         self.p = pyaudio.PyAudio()
-        self.stream = self.p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)  # Smaller buffer size
+        self.stream = self.p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)
         self.stream.start_stream()
 
     def listen(self):
@@ -88,10 +88,18 @@ class VideoManager:
                     img = frame.to_image()
                     frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
 
-                    # Clear screen and blit video frame centered and scaled
+                    # Preserve aspect ratio when scaling
+                    img_width, img_height = img.size
+                    screen_width, screen_height = self.screen.get_size()
+                    scale_factor = min(screen_width / img_width, screen_height / img_height)
+                    scaled_width, scaled_height = int(img_width * scale_factor), int(img_height * scale_factor)
+                    frame_surface = pygame.transform.scale(frame_surface, (scaled_width, scaled_height))
+
+                    # Center the scaled frame
+                    x_offset = (screen_width - scaled_width) // 2
+                    y_offset = (screen_height - scaled_height) // 2
                     self.screen.fill((0, 0, 0))
-                    video_rect = frame_surface.get_rect(center=(self.screen.get_width()//2, self.screen.get_height()//2))
-                    self.screen.blit(pygame.transform.scale(frame_surface, video_rect.size), video_rect.topleft)
+                    self.screen.blit(frame_surface, (x_offset, y_offset))
                     pygame.display.update()
                     pygame.time.delay(int(1000 / frame_rate))
                     self.handle_ui_events()
