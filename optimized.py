@@ -83,34 +83,43 @@ class VideoManager:
 
     def play_video(self):
         try:
-            print(f"Playing video: {self.video_path}")
-            container = av.open(self.video_path)
-            video_stream = container.streams.video[0]
-            frame_rate = float(video_stream.average_rate)
-
             while not self.stop_event.is_set():
-                for frame in container.decode(video=0):
-                    if self.stop_event.is_set():
-                        break
-                    img = frame.to_image()
-                    frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
+                try:
+                    print(f"Playing video: {self.video_path}")
+                    container = av.open(self.video_path)
+                    video_stream = container.streams.video[0]
+                    frame_rate = float(video_stream.average_rate)
+                    
+                    # Play frames in a loop until stop event is set
+                    for frame in container.decode(video=0):
+                        if self.stop_event.is_set():
+                            break
+                        img = frame.to_image()
+                        frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
 
-                    # Preserve aspect ratio when scaling
-                    img_width, img_height = img.size
-                    screen_width, screen_height = self.screen.get_size()
-                    scale_factor = min(screen_width / img_width, screen_height / img_height)
-                    scaled_width, scaled_height = int(img_width * scale_factor), int(img_height * scale_factor)
-                    frame_surface = pygame.transform.scale(frame_surface, (scaled_width, scaled_height))
+                        # Preserve aspect ratio when scaling
+                        img_width, img_height = img.size
+                        screen_width, screen_height = self.screen.get_size()
+                        scale_factor = min(screen_width / img_width, screen_height / img_height)
+                        scaled_width, scaled_height = int(img_width * scale_factor), int(img_height * scale_factor)
+                        frame_surface = pygame.transform.scale(frame_surface, (scaled_width, scaled_height))
 
-                    # Center the scaled frame
-                    x_offset = (screen_width - scaled_width) // 2
-                    y_offset = (screen_height - scaled_height) // 2
-                    self.screen.fill((0, 0, 0))
-                    self.screen.blit(frame_surface, (x_offset, y_offset))
-                    pygame.display.update()
-                    pygame.time.delay(int(1000 / frame_rate))
-                    self.handle_ui_events()
-            container.close()
+                        # Center the scaled frame
+                        x_offset = (screen_width - scaled_width) // 2
+                        y_offset = (screen_height - scaled_height) // 2
+                        self.screen.fill((0, 0, 0))
+                        self.screen.blit(frame_surface, (x_offset, y_offset))
+                        pygame.display.update()
+                        pygame.time.delay(int(1000 / frame_rate))
+                        self.handle_ui_events()
+                    # Close and re-open to loop the video if not stopped
+                    container.close()
+
+                except av.error.InvalidDataError:
+                    print("Error reading video file. Restarting...")
+                    time.sleep(1)
+                    continue
+
         except Exception as e:
             print(f"Error playing video: {e}")
 
