@@ -12,8 +12,8 @@ from TTS.api import TTS
 import sounddevice as sd
 
 # Paths to idle and talking avatar videos
-IDLE_VIDEO = 'idle.mp4'
-TALKING_VIDEO = 'speaking.mp4'
+IDLE_VIDEO = 'assets/idle.mp4'
+TALKING_VIDEO = 'assets/speaking.mp4'
 
 SYSTEM_PROMPT = """You are a friendly, chatty, and polite voice-based bot. Please respond concisely and conversationally, as if speaking to the user directly. Avoid technical terms and keep responses simple."""
 
@@ -21,7 +21,7 @@ class TTSManager:
     def __init__(self):
         self.tts_model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")  # Load once for efficiency
 
-    def run_tts(self, text, reference_audio_path="ref.wav", lang="en"):
+    def run_tts(self, text, reference_audio_path="assets/ref.wav", lang="en"):
         try:
             print("Generating TTS audio...")
             wav_data = self.tts_model.tts(text=text, speaker_wav=reference_audio_path, language=lang)
@@ -76,19 +76,24 @@ class VideoManager:
 
     def play_video(self):
         try:
+            print(f"Playing video: {self.video_path}")
             container = av.open(self.video_path)
             video_stream = container.streams.video[0]
-            frame_rate = max(15.0, float(video_stream.average_rate) - 5)
+            frame_rate = float(video_stream.average_rate)
 
-            for frame in container.decode(video=0):
-                if self.stop_event.is_set():
-                    break
-                img = frame.to_image()
-                frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
-                self.screen.blit(pygame.transform.scale(frame_surface, self.screen.get_size()), (0, 0))
-                pygame.display.flip()
-                pygame.time.delay(int(1000 / frame_rate))
-                self.handle_ui_events()
+            while not self.stop_event.is_set():
+                for frame in container.decode(video=0):
+                    if self.stop_event.is_set():
+                        break
+                    img = frame.to_image()
+                    frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
+                    
+                    # Clear screen and blit video frame centered and scaled
+                    self.screen.fill((0, 0, 0))
+                    self.screen.blit(pygame.transform.scale(frame_surface, (1024, 1600)), (0, 0))
+                    pygame.display.update()
+                    pygame.time.delay(int(1000 / frame_rate))
+                    self.handle_ui_events()
             container.close()
         except Exception as e:
             print(f"Error playing video: {e}")
@@ -102,7 +107,7 @@ class VideoManager:
 class AvatarChatbot:
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((640, 480))
+        self.screen = pygame.display.set_mode((1024, 1600))  # Set display to match desired video resolution in portrait
         pygame.display.set_caption('Avatar Chatbot')
         self.tts_manager = TTSManager()
         self.speech_manager = SpeechManager()
@@ -147,7 +152,6 @@ class AvatarChatbot:
         except Exception as e:
             print(f"Error occurred: {e}")
             self.cleanup()
-
 
 if __name__ == "__main__":
     try:
