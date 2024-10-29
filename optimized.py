@@ -14,6 +14,7 @@ import sounddevice as sd
 # Paths to idle and talking avatar videos
 IDLE_VIDEO = 'idle.mp4'
 TALKING_VIDEO = 'speaking.mp4'
+VIDEO_WIDTH, VIDEO_HEIGHT = 800, 600  # Adjust based on your screen and video size requirements
 
 SYSTEM_PROMPT = """You are a friendly, chatty, and polite voice-based bot. Please respond concisely and conversationally, as if speaking to the user directly. Avoid technical terms and keep responses simple."""
 
@@ -39,32 +40,29 @@ class SpeechManager:
         self.stream.start_stream()
 
     def listen(self):
+        print("Listening for user input...")
         buffer = b""
         full_text = ""
-        silence_threshold = 2  # Adjusted silence threshold
+        silence_threshold = 2
         silence_start = time.time()
-        print("Listening for user input...")
-
         while True:
             data = self.stream.read(4000, exception_on_overflow=False)
             buffer += data
-
-            # Check if a full sentence has been recognized
             if self.recognizer.AcceptWaveform(buffer):
                 result = self.recognizer.Result()
                 text = json.loads(result).get("text", "")
-
-                # Check for length or meaningful content before considering as input
-                if text and (len(text) > 2 or text in ["hi", "hello", "yes", "no"]):
+                if text:
                     print(f"Recognized Text: {text}")
                     full_text += text + " "
-                    silence_start = time.time()  # Reset silence timer after valid input
-                    break  # Exit loop once valid input is detected
-
-            # End listening if silent for the threshold time with no significant input
-            if time.time() - silence_start > silence_threshold and full_text.strip():
-                return full_text.strip()  # Return complete input after pause
-            buffer = b""  # Reset buffer for next read
+                    silence_start = time.time()
+            else:
+                partial_result = self.recognizer.PartialResult()
+                partial_text = json.loads(partial_result).get("partial", "")
+            if time.time() - silence_start > silence_threshold:
+                if full_text.strip():
+                    print(f"Final Text: {full_text}")
+                    return full_text.strip()
+            buffer = b""
 
     def generate_llama_response(self, prompt):
         try:
@@ -83,51 +81,36 @@ class VideoManager:
 
     def play_video(self):
         try:
+            container = av.open(self.video_path)
+            video_stream = container.streams.video[0]
+            frame_rate = float(video_stream.average_rate)
             while not self.stop_event.is_set():
-                try:
-                    print(f"Playing video: {self.video_path}")
-                    container = av.open(self.video_path)
-                    video_stream = container.streams.video[0]
-                    frame_rate = float(video_stream.average_rate)
-                    
-                    # Play frames in a loop until stop event is set
-                    for frame in container.decode(video=0):
-                        if self.stop_event.is_set():
-                            break
-                        img = frame.to_image()
-                        frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
-
-                        # Preserve aspect ratio when scaling
-                        img_width, img_height = img.size
-                        screen_width, screen_height = self.screen.get_size()
-                        scale_factor = min(screen_width / img_width, screen_height / img_height)
-                        scaled_width, scaled_height = int(img_width * scale_factor), int(img_height * scale_factor)
-                        frame_surface = pygame.transform.scale(frame_surface, (scaled_width, scaled_height))
-
-                        # Center the scaled frame
-                        x_offset = (screen_width - scaled_width) // 2
-                        y_offset = (screen_height - scaled_height) // 2
-                        self.screen.fill((0, 0, 0))
-                        self.screen.blit(frame_surface, (x_offset, y_offset))
-                        pygame.display.update()
-                        pygame.time.delay(int(1000 / frame_rate))
-                        self.handle_ui_events()
-                    # Close and re-open to loop the video if not stopped
-                    container.close()
-
-                except av.error.InvalidDataError:
-                    print("Error reading video file. Restarting...")
-                    time.sleep(1)
-                    continue
-
+                for frame in container.decode(video=0):
+                    img = frame.to_image()
+                    frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
+                    frame_surface = pygame.transform.scale(frame_surface, (VIDEO_WIDTH, VIDEO_HEIGHT))
+                    self.screen.fill((0, 0, 0))
+                    self.screen.blit(frame_surface, (10, 50))  # Center frame with offset
+                    pygame.display.flip()
+                    pygame.time.delay(int(1000 / (frame_rate * 1.2)))
+                    self.handle_ui_events()
+                    if self.stop_event.is_set():
+                        break
+                if not self.stop_event.is_set():
+                    container.seek(0)
         except Exception as e:
             print(f"Error playing video: {e}")
+        finally:
+            container.close()
 
     def handle_ui_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+
+    def stop_video(self):
+        self.stop_event.set()
 
 class AvatarChatbot:
     def __init__(self):
@@ -136,25 +119,20 @@ class AvatarChatbot:
         pygame.display.set_caption('Avatar Chatbot')
         self.tts_manager = TTSManager()
         self.speech_manager = SpeechManager()
-        self.video_semaphore = threading.Semaphore(1)
         self.idle_video_manager = VideoManager(self.screen, IDLE_VIDEO)
 
     def transition_to_speaking(self, bot_response):
         # Stop the idle video
-        self.idle_video_manager.stop_event.set()
-        self.idle_video_manager.stop_event.clear()
-
+        self.idle_video_manager.stop_video()
         # Generate TTS audio fully before starting the speaking video
         self.tts_manager.run_tts(bot_response)
-
         # Only then start the speaking video
         speaking_video_manager = VideoManager(self.screen, TALKING_VIDEO)
         speaking_thread = threading.Thread(target=speaking_video_manager.play_video)
         speaking_thread.start()
-        speaking_thread.join()
+        speaking_thread.join()  # Ensure completion before returning to idle video
 
     def run(self):
-        # Start idle video loop
         idle_thread = threading.Thread(target=self.idle_video_manager.play_video)
         idle_thread.start()
 
@@ -163,10 +141,9 @@ class AvatarChatbot:
                 user_input = self.speech_manager.listen()
                 if user_input:
                     bot_response = self.speech_manager.generate_llama_response(user_input)
-                    
                     self.transition_to_speaking(bot_response)
-                    
                     # Restart idle video after response completion
+                    self.idle_video_manager = VideoManager(self.screen, IDLE_VIDEO)
                     idle_thread = threading.Thread(target=self.idle_video_manager.play_video)
                     idle_thread.start()
         except Exception as e:
