@@ -41,23 +41,30 @@ class SpeechManager:
     def listen(self):
         buffer = b""
         full_text = ""
-        silence_threshold = 2
+        silence_threshold = 2  # Adjusted silence threshold
         silence_start = time.time()
         print("Listening for user input...")
 
         while True:
             data = self.stream.read(4000, exception_on_overflow=False)
             buffer += data
+
+            # Check if a full sentence has been recognized
             if self.recognizer.AcceptWaveform(buffer):
                 result = self.recognizer.Result()
                 text = json.loads(result).get("text", "")
-                if text and len(text.split()) > 2:  # Filtering out short or noise-like inputs
+
+                # Check for length or meaningful content before considering as input
+                if text and (len(text) > 2 or text in ["hi", "hello", "yes", "no"]):
                     print(f"Recognized Text: {text}")
                     full_text += text + " "
-                    silence_start = time.time()
+                    silence_start = time.time()  # Reset silence timer after valid input
+                    break  # Exit loop once valid input is detected
+
+            # End listening if silent for the threshold time with no significant input
             if time.time() - silence_start > silence_threshold and full_text.strip():
-                return full_text.strip()  # Return full input after pause
-            buffer = b""
+                return full_text.strip()  # Return complete input after pause
+            buffer = b""  # Reset buffer for next read
 
     def generate_llama_response(self, prompt):
         try:
