@@ -1,4 +1,5 @@
 import threading
+import queue
 import av
 import pygame
 import sys
@@ -6,7 +7,6 @@ import vosk
 import json
 import time
 import ollama
-import os
 import pyaudio
 import numpy as np
 from TTS.api import TTS
@@ -16,35 +16,27 @@ import sounddevice as sd
 IDLE_VIDEO = 'idle.mp4'
 TALKING_VIDEO = 'speaking.mp4'
 
-SYSTEM_PROMPT = """You are a friendly, chatty and polite voice-based bot. Please respond concisely and conversationally, as if speaking to the user directly. Avoid technical terms and keep responses simple."""
+SYSTEM_PROMPT = """You are a friendly, chatty, and polite voice-based bot. Please respond concisely and conversationally, as if speaking to the user directly. Avoid technical terms and keep responses simple."""
 
 class TTSManager:
     def __init__(self):
-        self.speech_completed = threading.Event()
-        self.tts_model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")
+        self.tts_model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")  # Load once for efficiency
 
     def run_tts(self, text, reference_audio_path="ref.wav", lang="en"):
-        self.speech_completed.clear()
-        print("TTS (Coqui TTS) audio generation started...")
-
         try:
+            print("Generating TTS audio...")
             wav_data = self.tts_model.tts(text=text, speaker_wav=reference_audio_path, language=lang)
             audio_array = np.array(wav_data, dtype=np.float32)
-            print("TTS (Coqui TTS) audio generated, now playing...")
-            sd.play(audio_array, samplerate=22050)
-            sd.wait()
+            sd.play(audio_array, samplerate=22050, blocking=True)
         except Exception as e:
-            print(f"An error occurred while generating TTS audio: {e}")
-
-        self.speech_completed.set()
+            print(f"TTS error: {e}")
 
 class SpeechManager:
     def __init__(self):
-        self.model_path = "vosk-model-small-en-us-0.15"
-        self.model = vosk.Model(self.model_path)
+        self.model = vosk.Model("vosk-model-small-en-us-0.15")
         self.recognizer = vosk.KaldiRecognizer(self.model, 16000)
         self.p = pyaudio.PyAudio()
-        self.stream = self.p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)
+        self.stream = self.p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=16000)
         self.stream.start_stream()
 
     def listen(self):
@@ -53,6 +45,7 @@ class SpeechManager:
         full_text = ""
         silence_threshold = 2
         silence_start = time.time()
+
         while True:
             data = self.stream.read(4000, exception_on_overflow=False)
             buffer += data
@@ -63,127 +56,102 @@ class SpeechManager:
                     print(f"Recognized Text: {text}")
                     full_text += text + " "
                     silence_start = time.time()
-            else:
-                partial_result = self.recognizer.PartialResult()
-                partial_text = json.loads(partial_result).get("partial", "")
-            if time.time() - silence_start > silence_threshold:
-                if full_text.strip():
-                    print(f"Final Text: {full_text}")
-                    return full_text.strip()
+            if time.time() - silence_start > silence_threshold and full_text.strip():
+                return full_text.strip()
             buffer = b""
 
     def generate_llama_response(self, prompt):
         try:
-            full_prompt = "\n".join([SYSTEM_PROMPT] + [f"User: {prompt}", "Bot:"])
+            full_prompt = f"{SYSTEM_PROMPT}\nUser: {prompt}\nBot:"
             response = ollama.generate(model="dolphin-llama3", prompt=full_prompt)
-            bot_reply = response.get("response", "Sorry, I couldn't generate a response.")
-            print(bot_reply)
-            return bot_reply
+            return response.get("response", "I couldn't generate a response.")
         except Exception as e:
-            print(f"Error generating response: {e}")
-            return "I apologize, but I encountered an issue while generating a response. Could you please try again."
+            print(f"Llama response generation error: {e}")
+            return "Error generating response."
 
 class VideoManager:
-    def __init__(self, screen, video_path, stop_event):
+    def __init__(self, screen, video_path, event_queue):
         self.screen = screen
         self.video_path = video_path
-        self.stop_event = stop_event
+        self.event_queue = event_queue
 
     def play_video(self):
         try:
             container = av.open(self.video_path)
             video_stream = container.streams.video[0]
-            frame_rate = float(video_stream.average_rate)
-            while not self.stop_event.is_set():
+            frame_rate = max(15.0, float(video_stream.average_rate) - 5)
+            while True:
                 for frame in container.decode(video=0):
                     img = frame.to_image()
                     frame_surface = pygame.image.frombuffer(img.tobytes(), img.size, img.mode)
-                    frame_surface = pygame.transform.scale(frame_surface, (self.screen.get_width(), self.screen.get_height()))
-                    self.screen.fill((200, 200, 200))
-                    self.screen.blit(frame_surface, (0, 0))
+                    self.screen.blit(pygame.transform.scale(frame_surface, self.screen.get_size()), (0, 0))
                     pygame.display.flip()
-                    pygame.time.delay(int(1000 / (frame_rate * 1.2)))
+                    pygame.time.delay(int(1000 / frame_rate))
                     self.handle_ui_events()
-                    if self.stop_event.is_set():
-                        break
-                if not self.stop_event.is_set():
-                    container.seek(0)
+
+                    if not self.event_queue.empty():
+                        command = self.event_queue.get()
+                        if command == "STOP":
+                            return
+                container.seek(0)  # Loop video if not stopped
         except Exception as e:
             print(f"Error playing video: {e}")
-        finally:
-            container.close()
 
     def handle_ui_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                self.stop_event.set()
                 pygame.quit()
                 sys.exit()
 
 class AvatarChatbot:
     def __init__(self):
         pygame.init()
-        self.info = pygame.display.Info()
-        self.screen = pygame.display.set_mode((self.info.current_w, self.info.current_h))
+        display_info = pygame.display.Info()
+        screen_width, screen_height = display_info.current_w, display_info.current_h
+        self.screen = pygame.display.set_mode((screen_width, screen_height), pygame.RESIZABLE)
         pygame.display.set_caption('Avatar Chatbot')
+
         self.tts_manager = TTSManager()
         self.speech_manager = SpeechManager()
-        self.stop_event = threading.Event()
+        self.event_queue = queue.Queue()  # Queue for communication between threads
+        self.current_video_manager = None  # Keep track of the current video
+
+    def run_pygame_video_loop(self):
+        while True:
+            if not self.event_queue.empty():
+                command = self.event_queue.get()
+                if command == "IDLE":
+                    self.play_video(IDLE_VIDEO)
+                elif command == "TALKING":
+                    self.play_video(TALKING_VIDEO)
+
+    def play_video(self, video_path):
+        if self.current_video_manager:
+            self.event_queue.put("STOP")  # Stop current video
+        self.current_video_manager = VideoManager(self.screen, video_path, self.event_queue)
+        self.current_video_manager.play_video()
+
+    def main_loop(self):
+        pygame_thread = threading.Thread(target=self.run_pygame_video_loop, daemon=True)
+        pygame_thread.start()
+
+        try:
+            self.event_queue.put("IDLE")  # Start with idle video
+            while True:
+                user_input = self.speech_manager.listen()
+                if user_input:
+                    bot_response = self.speech_manager.generate_llama_response(user_input)
+                    self.event_queue.put("TALKING")  # Switch to speaking video
+                    self.tts_manager.run_tts(bot_response)
+                    self.event_queue.put("IDLE")  # Return to idle video after response
+        except KeyboardInterrupt:
+            print("Exiting...")
+            self.cleanup()
 
     def cleanup(self):
-        print("Cleaning up resources...")
         pygame.quit()
         sys.exit()
 
-    def run(self):
-        idle_video_manager = VideoManager(self.screen, IDLE_VIDEO, self.stop_event)
-        idle_thread = threading.Thread(target=idle_video_manager.play_video)
-        idle_thread.start()
-
-        try:
-            while not self.stop_event.is_set():
-                try:
-                    user_input = self.speech_manager.listen()
-                except Exception as e:
-                    print(f"Error in voice recognition: {e}")
-                    continue
-
-                if user_input:
-                    print(f"User said: {user_input}")
-                    bot_response = self.speech_manager.generate_llama_response(user_input)
-
-                    idle_video_manager.stop_event.set()
-                    idle_thread.join()
-
-                    speaking_video_manager = VideoManager(self.screen, TALKING_VIDEO, self.stop_event)
-                    speaking_video_thread = threading.Thread(target=speaking_video_manager.play_video)
-                    tts_thread = threading.Thread(target=self.tts_manager.run_tts, args=(bot_response,))
-
-                    speaking_video_thread.start()
-                    tts_thread.start()
-
-                    tts_thread.join()
-                    speaking_video_manager.stop_event.set()
-                    speaking_video_thread.join()
-
-                    # Reset stop event for next loop
-                    self.stop_event.clear()
-                    idle_video_manager = VideoManager(self.screen, IDLE_VIDEO, self.stop_event)
-                    idle_thread = threading.Thread(target=idle_video_manager.play_video)
-                    idle_thread.start()
-
-        except Exception as e:
-            print(f"Error occurred: {e}")
-            self.stop_event.set()
-        finally:
-            self.cleanup()
-
-
 if __name__ == "__main__":
-    try:
-        avatar_chatbot = AvatarChatbot()
-        avatar_chatbot.run()
-    except KeyboardInterrupt:
-        print("Exiting...")
-        avatar_chatbot.stop_event.set()
-        avatar_chatbot.cleanup()
+    avatar_chatbot = AvatarChatbot()
+    avatar_chatbot.main_loop()
